@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # 检查是否为root用户
 if [[ $EUID -ne 0 ]]; then
     echo "请以 root 用户身份运行此脚本。"
@@ -6,9 +7,10 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 while true; do
+    clear
     echo "
 +-------------------------------------------------------------------------+
-|                       系统工具 V1.0                                     |
+|                     阳哥的百依百顺工具 V1.2                             |
 +-------------------------------------------------------------------------+
 |               1. 关闭防火墙和安全组                                     |
 |               2. 删除当前YUM源                                          |
@@ -16,22 +18,22 @@ while true; do
 |               4. 配置静态IP                                             |
 |               5. 安装常用软件                                           |
 |               6. 一键安装Docker                                         |
-|               7. 一键安装Nginx                                          |
-|               8. 退出                                                   |
+|               7. 一键配置docker加速器                                   |
+|               8. 一键安装Nginx                                          |
+|               9. 系统监控                                               |
+|               10. 退出                                                  |
 +-------------------------------------------------------------------------+
 "
 
-    read -p "请选择你想使用的功能(1-8):" num
+    read -p "请选择你想使用的功能(1-10):" num
 
     case $num in
         1)
             systemctl stop firewalld
-            systemctl disable firewalld
-            setenforce 0
+            systemctl disable firewalld &>/dev/null
+            setenforce 0 &>/dev/null
             sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
-            systemctl is-enabled firewalld &>/dev/null && systemctl disable firewalld
-            systemctl status firewalld &>/dev/null
-            if [ $? -ne 0 ]; then
+            if ! systemctl is-active --quiet firewalld; then
                 echo "你已成功关闭防火墙和安全组"
             else
                 echo "关闭失败，请重新关闭"
@@ -40,7 +42,7 @@ while true; do
         2)
             read -p "确定要删除所有YUM源吗? (y/n)" yn
             if [ "$yn" == "y" ]; then
-                rm -rf /etc/yum.repos.d/*repo
+                rm -rf /etc/yum.repos.d/*.repo
                 echo "YUM源已被删除"
             else
                 echo "操作取消"
@@ -49,6 +51,7 @@ while true; do
         3)
             curl -o /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo
             curl -o /etc/yum.repos.d/epel.repo https://mirrors.aliyun.com/repo/epel-7.repo
+            yum makecache fast
             echo "YUM源已配置完成"
             ;;
         4)
@@ -81,49 +84,131 @@ EOF
             echo "静态 IP 地址已成功配置。"
             ;;
         5)
-            echo "1. 一键安装常用软件"
-            read -p "你确定要安装吗？(1确定/2退出）" a
+            echo "正在安装常用软件..."
+            yum install -y wget vim git lrzsz vsftpd
+            if [ $? -eq 0 ]; then
+                echo "你已成功安装 wget, vim, git, lrzsz 和 vsftpd"
+            else
+                echo "安装失败，请重新安装"
+            fi
+            ;;
+        6)
+            echo "正在安装 Docker..."
+            sudo yum remove -y docker docker-common docker-selinux docker-engine &>/dev/null
+            sudo yum install -y yum-utils device-mapper-persistent-data lvm2
+            wget -O /etc/yum.repos.d/docker-ce.repo https://mirrors.huaweicloud.com/docker-ce/linux/centos/docker-ce.repo
+            sed -i 's+download.docker.com+mirrors.huaweicloud.com/docker-ce+' /etc/yum.repos.d/docker-ce.repo
+            sudo yum makecache fast -y
+            sudo yum install -y docker-ce
+            docker --version
+            systemctl start docker
+            systemctl enable docker
+            echo "Docker 已成功安装并启动。"
+            ;;
+        7)
+            echo "正在配置 Docker 加速器..."
+            sudo mkdir -p /etc/docker
+            sudo tee /etc/docker/daemon.json <<-'EOF'
+{
+    "registry-mirrors": [
+        "https://2a6bf1988cb6428c877f723ec7530dbc.mirror.swr.myhuaweicloud.com",
+        "https://docker.m.daocloud.io",
+        "https://hub-mirror.c.163.com",
+        "https://mirror.baidubce.com",
+        "https://dockerhub.icu",
+        "https://docker.registry.cyou",
+        "https://docker-cf.registry.cyou",
+        "https://dockercf.jsdelivr.fyi",
+        "https://docker.jsdelivr.fyi",
+        "https://dockertest.jsdelivr.fyi",
+        "https://mirror.aliyuncs.com",
+        "https://dockerproxy.com",
+        "https://mirror.baidubce.com",
+        "https://docker.nju.edu.cn",
+        "https://docker.mirrors.sjtug.sjtu.edu.cn",
+        "https://docker.mirrors.ustc.edu.cn",
+        "https://mirror.iscas.ac.cn",
+        "https://docker.rainbond.cc",
+        "https://docker.211678.top",
+        "https://docker.1panel.live",
+        "https://hub.rat.dev",
+        "https://do.nark.eu.org",
+        "https://dockerpull.com",
+        "https://dockerproxy.cn",
+        "https://docker.awsl9527.cn"
+    ]
+}
+EOF
+            systemctl daemon-reload
+            systemctl restart docker
+            echo "Docker 加速器已配置完成。"
+            ;;
+        8)
+            echo "正在安装 Nginx..."
+            read -p "你确定要安装 Nginx 吗？(1确定/2退出)" a
             if [ "$a" -eq 1 ]; then
-                echo "正在安装"
-                yum install -y wget vim git lrzsz vfstpd
+                yum install -y nginx
                 if [ $? -eq 0 ]; then
-                    echo "你已成功安装wget, vim, git, lrzsz 和 vfstpd"
+                    echo "Nginx 已安装，正在启动 Nginx 服务..."
+                    systemctl start nginx
+                    systemctl enable nginx
+                    echo "Nginx 已安装并启动"
                 else
-                    echo "安装失败，请重新安装"
+                    echo "Nginx 安装失败，请重新安装"
                 fi
             elif [ "$a" -eq 2 ]; then
                 echo "程序退出"
             fi
             ;;
-        6)
-            sudo yum remove docker docker-common docker-selinux docker-engine
-            sudo yum install -y yum-utils device-mapper-persistent-data lvm2
-            wget -O /etc/yum.repos.d/docker-ce.repo https://mirrors.huaweicloud.com/docker-ce/linux/centos/docker-ce.repo
-            sed -i 's+download.docker.com+mirrors.huaweicloud.com/docker-ce+' /etc/yum.repos.d/docker-ce.repo
-            sudo yum makecache fast -y
-            sudo yum install docker-ce -y
-            docker --version
-            systemctl restart docker
+        9)
+            watch --color -n 5 '
+echo -e "\033[1;36m=== 系统监控 ===\033[0m"
+
+# 智能CPU检测
+cores=$(lscpu 2>/dev/null | awk "/^CPU(s):/ {print \$2}" || nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo)
+loadavg=$(awk "{printf \"%.2f/%.2f/%.2f\", \$1,\$2,\$3}" /proc/loadavg 2>/dev/null)
+echo "CPU负载:\t${loadavg:-N/A} (核心数: ${cores:-未知})"
+
+# 自适应内存单位
+if free -b &>/dev/null; then
+    free -b | awk "
+        /^Mem:/ {
+            if (\$2 == 0) exit 1;
+            used = \$3 + \$6;
+            total = \$2;
+            unit=\"GB\"; divisor=1073741824;
+            printf \"内存使用:\t%.2f%s / %.2f%s (%.1f%%)\n\", used/divisor, unit, total/divisor, unit, (used/total)*100;
+        }
+    "
+else
+    echo "内存数据不可用"
+fi
+
+# 存储空间检测
+df -hT / 2>/dev/null | awk "
+NR==2 {
+    if (NF >= 6) {
+        used_col=\$5; total_col=\$3;
+    } else {
+        used_col=\$3; total_col=\$2;
+    }
+    gsub(/%/, \"\", used_col);
+    printf \"存储空间:\t%s 已用 / %s 总量 (%.1f%%)\n\", \$4, total_col, used_col;
+}
+"
+
+# TCP连接数检测
+ss -s 2>/dev/null | awk "
+/TCP/ {
+    if (/v6/) ver=6; else ver=4;
+    sub(/$|$/, \"\", \$2);
+    print \"TCPv\" ver \"连接数:\t\" \$2;
+    exit;
+}
+"
+'
             ;;
-        7)
-            echo "7. 一键安装Nginx"  
-            read -p "你确定要安装Nginx吗？(1确定/2退出）" a  
-            if [ "$a" -eq 1 ]; then  
-                echo "正在安装Nginx"  
-                yum install -y nginx  
-                if [ $? -eq 0 ]; then  
-                    echo "Nginx已安装，正在启动Nginx服务..."  
-                    systemctl start nginx  
-                    systemctl enable nginx  
-                    echo "Nginx已安装并启动"  
-                else  
-                    echo "Nginx安装失败，请重新安装"  
-                fi  
-            elif [ "$a" -eq 2 ]; then  
-                echo "程序退出"  
-            fi  
-            ;;
-        8)
+        10)
             echo "退出脚本。"
             exit
             ;;
